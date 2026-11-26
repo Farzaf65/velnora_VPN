@@ -79,13 +79,21 @@ jobs:
             if [ $? -ne 0 ]; then
               echo "::warning::Engine download failed"; tail -5 engine-clone.log
             else
-              yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1
-              "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.0.13004108" "cmake;3.22.1" > /dev/null 2>&1
-              gradle -p "$PROJ" $TASK -Pengine=on --no-daemon --console=plain > build-engine.log 2>&1
+              python3 "$PROJ/engine-prep.py" "$PROJ" > engine-prep.log 2>&1
+              cat engine-prep.log
+              SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+              yes | "$SDKM" --licenses > /dev/null 2>&1
+              "$SDKM" "ndk;28.0.13004108" "cmake;3.22.1" > /dev/null 2>&1
+              if [ -f "$PROJ/ndk.txt" ]; then "$SDKM" "ndk;$(cat "$PROJ/ndk.txt")" > /dev/null 2>&1; fi
+              GR="gradle"
+              if [ -f "$PROJ/gradlew" ]; then chmod +x "$PROJ/gradlew"; GR="$PROJ/gradlew"; fi
+              echo "Engine build uses: $GR"
+              $GR -p "$PROJ" $TASK -Pengine=on --no-daemon --console=plain > build-engine.log 2>&1
               if [ $? -eq 0 ]; then
                 ENGINE_OK=1
               else
                 echo "::warning::ENGINE BUILD FAILED - the lines below are what to send me"
+                grep "^INFO" engine-prep.log | while IFS= read -r l; do echo "::warning::$l"; done
                 grep -E "^e: |error:|What went wrong" -A3 build-engine.log | head -40 | while IFS= read -r l; do echo "::warning::$l"; done
                 tail -40 build-engine.log
               fi
@@ -96,7 +104,8 @@ jobs:
             echo "ENGINE=on" >> "$GITHUB_ENV"
           else
             echo "Step 2: building the app without the engine"
-            rm -rf "$PROJ/app/build"
+            for f in build.gradle.kts app/build.gradle.kts; do if [ -f "$PROJ/$f.orig" ]; then cp "$PROJ/$f.orig" "$PROJ/$f"; fi; done
+            rm -rf "$PROJ/gradle" "$PROJ/gradlew" "$PROJ/gradlew.bat" "$PROJ/app/build"
             gradle -p "$PROJ" $TASK --no-daemon --console=plain > build.log 2>&1
             RC=$?
             if [ $RC -ne 0 ]; then
